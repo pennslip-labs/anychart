@@ -1,6 +1,10 @@
+import sys
 import unittest
+from pathlib import Path
 
-from image_block import build_image_operation, get_page_blocks, has_image_block
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from src.image_block import build_image_operation, get_page_blocks, has_image_block
 
 # These tests lock in the expected behavior for the page-block helper functions.
 # They are intentionally small and direct, because the real Anytype API calls are
