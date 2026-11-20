@@ -1,89 +1,35 @@
 # Workflows & Usage Examples
 
-This document illustrates the current working chart-push workflow alongside the planned workflows for the Fetcher, Modeler, Interactive Shell, and automated Recipe CLI.
+This document illustrates the interactive source-selection and chart-push workflow, alongside the planned Modeler, Interactive Shell, and automated Recipe CLI.
 
 ---
 
-## 1. Current Workflow: Rendering & Pushing a Chart (Working)
+## 1. Current Workflow: Selecting Data, Rendering & Pushing a Chart (Working)
 
-The verified baseline in `src/tests/test_chart_push.py` demonstrates authenticating against the local API with an unscoped `/v1` key, rendering a Chart.js bar graph via QuickChart, and replacing an existing Image block in-place:
+Run `python3 src/chart_push.py` with `ANYTYPE_API_KEY` and `ANYTYPE_PAGE_ID` set. Optionally set `ANYTYPE_SPACE_ID`; otherwise the script selects from accessible spaces. It then asks whether to use a Query/Collection view or a Type table, offers a property to group by, renders a Chart.js bar graph via QuickChart, and replaces an existing Image block in-place. The shared-space client calls are scoped through the selected Anytype space:
 
-```python
-import os
-import requests
-from anytype import Anytype
-
-API_URL = os.getenv("ANYTYPE_API_URL", "http://127.0.0.1:31012")
-API_KEY = os.environ["ANYTYPE_API_KEY"]
-SPACE_ID = os.environ["ANYTYPE_SPACE_ID"]
-PAGE_ID = os.environ["ANYTYPE_PAGE_ID"]
-OUTPUT_PNG = "sample_chartjs.png"
-
-# 1. Build Chart.js specification
-chart_config = {
-    "type": "bar",
-    "data": {
-        "labels": ["Done", "In Progress", "To Do"],
-        "datasets": [
-            {
-                "label": "Tasks",
-                "data": [14, 6, 10],
-                "backgroundColor": ["#4CAF50", "#2196F3", "#FF9800"],
-                "borderRadius": 6,
-            }
-        ],
-    },
-    "options": {
-        "plugins": {
-            "legend": {"display": False},
-            "title": {"display": True, "text": "Task Status Breakdown"},
-        },
-        "scales": {"y": {"beginAtZero": True}},
-    },
-}
-
-# 2. Render high-DPI PNG via QuickChart
-res = requests.post(
-    "https://quickchart.io/chart",
-    json={"chart": chart_config, "width": 800, "height": 450, "devicePixelRatio": 2},
-    timeout=15,
-)
-res.raise_for_status()
-with open(OUTPUT_PNG, "wb") as f:
-    f.write(res.content)
-
-# 3. Authenticate client with unscoped /v1 key (bypassing interactive /v2 pairing)
-client = Anytype()
-client.api_url = API_URL
-client.token = API_KEY
-if hasattr(client, "_apiEndpoints"):
-    client._apiEndpoints.api_url = API_URL
-    client._apiEndpoints.token = API_KEY
-    client._apiEndpoints._headers["Authorization"] = f"Bearer {API_KEY}"
-
-# 4. Upload PNG and swap target Image block in-place
-space = client.get_space(SPACE_ID)
-page = space.get_object(PAGE_ID)
-uploaded_file = space.upload_file(OUTPUT_PNG)
-
-updated = False
-for block in page.blocks:
-    if getattr(block, "type", None) == "image":
-        block.target_object_id = uploaded_file.id
-        page.update_block(block)
-        updated = True
-        break
-
-if not updated:
-    page.add_image(uploaded_file)
-    space.update_object(page)
+```text
+$ python3 src/chart_push.py
+1. Connecting to Anytype local API...
+   -> Using space 'Personal Vault' (bafyreig...)
+Fetch from [q]uery/collection or [t]ype? t
+Available types:
+  [1] Task (task-type-id)
+  [2] Note (note-type-id)
+Select a type [1-2]: 1
+Fetched 42 objects from type 'Task'.
+Available properties to graph:
+  [0] Count objects by type
+  [1] Status
+  [2] Priority
+Select a property [0-2]: 1
 ```
 
 ---
 
 ## 2. Planned Workflow: Interactive Modeling Shell (`shell.py`)
 
-Once the Fetcher and Modeler layers are wired into the `cmd.Cmd` REPL, exploring an unfamiliar space and shaping a chart interactively follows this session flow:
+Once the Modeler and shell interface are wired into the `cmd.Cmd` REPL, exploring an unfamiliar space and shaping a chart interactively follows this session flow:
 
 ```text
 $ python3 -m anychart.shell

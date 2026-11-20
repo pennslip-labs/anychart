@@ -1,49 +1,30 @@
 """Render a chart, save it locally, and push it to an Anytype page.
 
-Configure ANYTYPE_API_KEY, ANYTYPE_SPACE_ID, and ANYTYPE_PAGE_ID in the
-environment, then run ``python src/chart_push.py``.
+Configure ANYTYPE_API_KEY and ANYTYPE_PAGE_ID in the environment, then run
+``python src/chart_push.py``. Set ANYTYPE_SPACE_ID to skip space selection.
 """
 
 import os
+import re
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 if __package__:
+    from .fetcher import choose_space, fetch_interactively, groupable_property_names
     from .image_block import build_image_operation, get_page_blocks, has_image_block
 else:
+    from fetcher import choose_space, fetch_interactively, groupable_property_names
     from image_block import build_image_operation, get_page_blocks, has_image_block
 
 API_URL = os.environ.get("ANYTYPE_API_URL", "http://127.0.0.1:31012")
 OUTPUT_FILENAME = "sample_chartjs.png"
 
-CHART_CONFIG = {
-    "type": "bar",
-    "data": {
-        "labels": ["Done", "In Progress", "To Do"],
-        "datasets": [
-            {
-                "label": "Sample Tasks",
-                "data": [95, 32, 44],
-                "backgroundColor": ["#4CAF50", "#2196F3", "#FF9800"],
-                "borderRadius": 6,
-            }
-        ],
-    },
-    "options": {
-        "plugins": {
-            "legend": {"display": False},
-            "title": {
-                "display": True,
-                "text": "Anytype Test Chart (Chart.js via QuickChart)",
-                "font": {"size": 18},
-            },
-        },
-        "scales": {"y": {"beginAtZero": True}},
-    },
-}
-
 
 def resolve_export_path(
-    export_directory: str, downloads_directory: Path | None = None
+    export_directory: str,
+    downloads_directory: Path | None = None,
+    filename: str = OUTPUT_FILENAME,
 ) -> Path:
     """Resolve the export folder, defaulting to the user's Downloads directory."""
     downloads_directory = downloads_directory or (Path.home() / "Downloads")
@@ -53,7 +34,127 @@ def resolve_export_path(
         if export_directory
         else downloads_directory
     )
-    return (directory / OUTPUT_FILENAME).resolve()
+    return (directory / filename).resolve()
+
+
+def build_output_filename(
+    source_name: str,
+    property_name: str | None,
+    created_at: datetime | None = None,
+) -> str:
+    """Create a filesystem-safe name describing the source, grouping, and date."""
+    created_at = created_at or datetime.now()
+    source_slug = _slugify(source_name)
+    property_slug = _slugify(property_name or "object type")
+    date_tag = created_at.strftime("%d-%m-%y")
+    return f"{source_slug}_by_{property_slug}_{date_tag}.png"
+
+
+def build_chart_config(
+    objects: list,
+    property_name: str | None = None,
+    source_name: str = "Objects",
+    created_at: datetime | None = None,
+) -> dict:
+    """Build a bar chart counting objects by property or by object type."""
+    counts: Counter[str] = Counter()
+    if property_name:
+        for obj in objects:
+            properties = getattr(obj, "properties", {})
+            prop = (
+                properties.get(property_name)
+                if isinstance(properties, dict)
+                else None
+            )
+            value = getattr(prop, "value", None) if prop is not None else None
+            values = value if isinstance(value, (list, tuple, set)) else [value]
+            for item in values:
+                label = getattr(item, "name", item)
+                counts[str(label) if label not in (None, "") else "Uncategorized"] += 1
+        group_label = property_name
+    else:
+        for obj in objects:
+            object_type = getattr(obj, "type", None)
+            label = getattr(object_type, "name", None) or getattr(
+                obj, "type_key", None
+            )
+            counts[str(label or "Objects")] += 1
+        group_label = "object type"
+
+    if not counts:
+        raise ValueError("No chartable values were found in the fetched objects.")
+
+    created_at = created_at or datetime.now()
+    date_tag = created_at.strftime("%d-%m-%y")
+    chart_title = f"{source_name} by {group_label} ({date_tag})"
+    return {
+        "type": "bar",
+        "data": {
+            "labels": list(counts),
+            "datasets": [
+                {
+                    "label": f"Objects by {group_label}",
+                    "data": list(counts.values()),
+                    "backgroundColor": [
+                        (
+                            "#4CAF50",
+                            "#2196F3",
+                            "#FF9800",
+                            "#9C27B0",
+                            "#00ACC1",
+                            "#F44336",
+                        )[index % 6]
+                        for index in range(len(counts))
+                    ],
+                    "borderRadius": 6,
+                }
+            ],
+        },
+        "options": {
+            "plugins": {
+                "legend": {"display": False},
+                "title": {
+                    "display": True,
+                    "text": chart_title,
+                    "font": {"size": 18},
+                },
+            },
+            "scales": {"y": {"beginAtZero": True}},
+        },
+    }
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_").lower()
+    return slug or "chart"
+
+
+def choose_group_property(
+    objects: list,
+    input_fn=input,
+    print_fn=print,
+) -> str | None:
+    """Ask which discovered object property should be used for chart grouping."""
+    properties = groupable_property_names(objects)
+    if not properties:
+        print_fn("No groupable properties found; counting objects by type.")
+        return None
+
+    print_fn("Available properties to graph:")
+    print_fn("  [0] Count objects by type")
+    for index, name in enumerate(properties, start=1):
+        print_fn(f"  [{index}] {name}")
+    while True:
+        answer = input_fn(f"Select a property [0-{len(properties)}]: ").strip()
+        try:
+            index = int(answer)
+        except ValueError:
+            index = -1
+        if index == 0:
+            return None
+        if 1 <= index <= len(properties):
+            return properties[index - 1]
+        print_fn(f"Enter a number from 0 to {len(properties)}.")
 
 
 def main() -> None:
@@ -68,61 +169,39 @@ def main() -> None:
         raise RuntimeError(
             "Set the ANYTYPE_PAGE_ID environment variable before running this script."
         )
-    if not space_id:
-        raise RuntimeError(
-            "Set the ANYTYPE_SPACE_ID environment variable before running this script."
-        )
+    import requests
+    from anytype import Anytype
+    from anytype.api import API_CONFIG
+
+    print("1. Connecting to Anytype local API...")
+    API_CONFIG["apiUrl"] = f"{API_URL.rstrip('/')}/v1"
+    client = Anytype()
+    client.auth(persist_token=False, api_key=api_key)
+
+    space = choose_space(client, space_id)
+    print(f"   -> Using space {space.name!r} ({space.id})")
+    objects, source_name = fetch_interactively(space)
+    property_name = choose_group_property(objects)
+    created_at = datetime.now()
+    chart_config = build_chart_config(
+        objects, property_name, source_name, created_at
+    )
+    output_filename = build_output_filename(
+        source_name, property_name, created_at
+    )
 
     default_directory = Path.home() / "Downloads"
     export_directory = input(
         f"Chart export folder [leave empty for {default_directory}]: "
     )
-    output_path = resolve_export_path(export_directory, default_directory)
+    output_path = resolve_export_path(
+        export_directory, default_directory, output_filename
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    import requests
-    from anytype import Anytype
-    from anytype.api import API_CONFIG
-
-    print("1. Rendering Chart.js PNG via QuickChart...")
-    render_response = requests.post(
-        "https://quickchart.io/chart",
-        json={
-            "chart": CHART_CONFIG,
-            "width": 800,
-            "height": 450,
-            "devicePixelRatio": 2,
-            "backgroundColor": "white",
-        },
-        timeout=15,
-    )
-    render_response.raise_for_status()
-    output_path.write_bytes(render_response.content)
-    print(f"   -> Saved chart export: {output_path}")
-
-    print("2. Connecting to Anytype local API...")
-    API_CONFIG["apiUrl"] = f"{API_URL.rstrip('/')}/v1"
-    client = Anytype()
-    client.auth(persist_token=False, api_key=api_key)
-
-    spaces = client.get_spaces()
-    if not spaces:
-        raise RuntimeError(
-            "The bot can access no spaces. Invite its account to the target space, then retry."
-        )
-    space = next((candidate for candidate in spaces if candidate.id == space_id), None)
-    if space is None:
-        available_spaces = ", ".join(
-            f"{candidate.name!r} ({candidate.id})" for candidate in spaces
-        )
-        raise RuntimeError(
-            f"Space {space_id!r} is not accessible to this bot. "
-            f"Visible spaces: {available_spaces}. Invite the bot to the target space."
-        )
-
     api_headers = {"Authorization": f"Bearer {api_key}"}
-    page_url = f"{API_URL.rstrip('/')}/v2/spaces/{space_id}/objects/{page_id}"
-    print("3. Retrieving target page blocks...")
+    page_url = f"{API_URL.rstrip('/')}/v2/spaces/{space.id}/objects/{page_id}"
+    print("2. Retrieving target page blocks...")
     page_response = requests.get(page_url, headers=api_headers, timeout=15)
     if not page_response.ok:
         raise RuntimeError(
@@ -137,6 +216,22 @@ def main() -> None:
             f"Could not read blocks for page {page_id!r}: {error}. "
             f"Response keys: {sorted(page_document)}"
         ) from error
+
+    print("3. Rendering Chart.js PNG via QuickChart...")
+    render_response = requests.post(
+        "https://quickchart.io/chart",
+        json={
+            "chart": chart_config,
+            "width": 800,
+            "height": 450,
+            "devicePixelRatio": 2,
+            "backgroundColor": "white",
+        },
+        timeout=15,
+    )
+    render_response.raise_for_status()
+    output_path.write_bytes(render_response.content)
+    print(f"   -> Saved chart export: {output_path}")
 
     print("4. Uploading chart to Anytype...")
     uploaded_file = space.upload_file(str(output_path))

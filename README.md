@@ -57,9 +57,9 @@ flowchart LR
 
 | Layer / Component | Module | Status | Description |
 | :--- | :--- | :--- | :--- |
-| **Chart Renderer & Pusher** | `src/tests/test_chart_push.py` *(to be extracted to `pusher.py`)* | **Working** | Renders Chart.js configs to high-DPI PNGs, authenticates via unscoped `/v1` API key, uploads to space, and replaces existing Image blocks in-place. |
-| **Layer 1: Fetcher** | `src/anychart/fetcher.py` | **Next Up** | Wraps client auth, pulls objects from existing Anytype Queries/Collections or Type filters, and inspects available object property schemas. |
-| **Layer 2: Modeler** | `src/anychart/modeler.py` | **Planned** | Shapes raw Anytype objects on a case-by-case basis (`count`, `sum`, `avg`, `group_by`, time bucketing) into standardized Chart.js datasets. |
+| **Chart Renderer & Pusher** | `src/chart_push.py` | **Working** | Fetches selected Anytype data, renders a Chart.js distribution to high-DPI PNG, uploads it, and replaces an Image block in-place. |
+| **Layer 1: Fetcher** | `src/fetcher.py` | **Working** | Selects an accessible space, then fetches from a saved Query/Collection view or a selected Type. |
+| **Layer 2: Modeler** | `src/modeler.py` *(planned)* | **Planned** | Shapes raw Anytype objects on a case-by-case basis (`count`, `sum`, `avg`, `group_by`, time bucketing) into standardized Chart.js datasets. |
 | **Layer 3: Shell & CLI** | `src/anychart/shell.py` & `cli.py` | **Planned** | Interactive `cmd.Cmd` REPL for live querying/modeling, plus `save-recipe` / `run` commands for cron-scheduled automation. |
 
 ---
@@ -68,16 +68,21 @@ flowchart LR
 
 ```text
 anychart/
-├── README.md                    # Project overview, pitch, status, and quickstart
+├── README.md                           # Project overview, pitch, status, and quickstart
 ├── docs/
-│   ├── ARCHITECTURE.md          # Detailed 4-stage pipeline and layer specifications
-│   ├── SETUP_AND_BOT.md         # Headless daemon, bot account invite, and /v1 API auth guide
-│   └── WORKFLOWS.md             # Working push example, REPL transcript, and cron recipes
+│   ├── system_architecture_layers.md   # Detailed 4-stage pipeline and layer specifications
+│   ├── bot_api_setup_guide.md          # Headless daemon, bot account invite, and /v1 API auth guide
+│   └── workflows_examples.md           # Working push example, REPL transcript, and cron recipes
 ├── src/
-│   ├── anychart/                # Core package (fetcher, modeler, pusher, shell, cli)
+│   ├── block_update.py                # Legacy Mermaid block example
+│   ├── chart_push.py                   # Interactive chart render and push pipeline
+│   ├── fetcher.py                      # Space, Query/Collection, and Type data retrieval
+│   ├── image_block.py                  # Image-block update helpers
 │   └── tests/
-│       └── test_chart_push.py   # Verified end-to-end Chart.js render & block-swap test
-└── .gitignore                   # Excludes __pycache__/, .env, and temporary *.png outputs
+│       ├── test_chart_push.py
+│       ├── test_fetcher.py
+│       └── test_image_block.py
+└── .gitignore                          # Excludes __pycache__/, .env, and temporary *.png outputs
 ```
 
 ---
@@ -98,25 +103,28 @@ cd anychart
 pip install anytype-client requests
 ```
 
-### Run the Verified Chart Push Test
+### Generate and Push a Chart
 
-1. Set your target space, dashboard page ID, and unscoped `/v1` API key (see [`docs/SETUP_AND_BOT.md`](docs/SETUP_AND_BOT.md) for instructions):
+1. Set your dashboard page ID and unscoped `/v1` API key (see [`docs/bot_api_setup_guide.md`](docs/bot_api_setup_guide.md) for instructions):
 
 ```bash
 export ANYTYPE_API_URL="http://127.0.0.1:31012"
 export ANYTYPE_API_KEY="your_unscoped_v1_api_key"
+export ANYTYPE_PAGE_ID="your_dashboard_page_id"
+# Optional when the bot can access multiple spaces; otherwise the script asks.
+export ANYTYPE_SPACE_ID="your_space_id"
 ```
 
-2. Execute the push test script to render a sample Chart.js bar graph and replace the Image block on your target page:
+2. Execute the chart script. It prompts for a Query/Collection or Type table and a property to group by, then replaces the Image block on your target page. The exported PNG name includes the source, grouping property, and creation date (`DD-MM-YY`):
 
 ```bash
-python3 src/tests/test_chart_push.py
+python3 src/chart_push.py
 ```
 
 ---
 
 ## Documentation
 
-* **[Setup & Bot Authentication (`docs/SETUP_AND_BOT.md`)](docs/SETUP_AND_BOT.md):** How to run `anytype serve`, create and invite a dedicated `anychart-bot` account, generate unscoped `/v1` API keys, and handle `anytype-client` authentication quirks.
-* **[System Architecture (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md):** Architectural breakdown of the completed push utility and the upcoming Fetcher, Modeler, and Shell/CLI layers.
-* **[Workflows & Examples (`docs/WORKFLOWS.md`)](docs/WORKFLOWS.md):** Code examples for the current push pipeline, planned interactive shell sessions, and automated recipe execution.
+* **[Setup & Bot Authentication](docs/bot_api_setup_guide.md):** How to run `anytype serve`, create and invite a dedicated `anychart-bot` account, generate unscoped `/v1` API keys, and handle `anytype-client` authentication quirks.
+* **[System Architecture](docs/system_architecture_layers.md):** Architectural breakdown of the completed push utility and the upcoming Fetcher, Modeler, and Shell/CLI layers.
+* **[Workflows & Examples](docs/workflows_examples.md):** Code examples for the current push pipeline, planned interactive shell sessions, and automated recipe execution.

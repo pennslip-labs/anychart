@@ -16,7 +16,7 @@ flowchart TD
         Recipe -->|load| CLI
     end
 
-    subgraph Fetch["Layer 1: Fetcher (Next Up)"]
+    subgraph Fetch["Layer 1: Fetcher (Implemented)"]
         Client["Anytype Client Wrapper\n(Unscoped /v1 Auth)"]
         QFetch["Query / Collection Reader\nspace.get_listviews()"]
         TFetch["Dynamic Type Filter\nspace.get_objects()"]
@@ -56,10 +56,10 @@ flowchart TD
 
 ## Completed Foundation: Chart Renderer & In-Place Pusher
 
-**Current Location:** `src/tests/test_chart_push.py` *(to be refactored into `src/anychart/pusher.py`)*
+**Current Location:** `src/chart_push.py` with data retrieval in `src/fetcher.py`.
 
 The bottom of the pipeline is built and verified:
-1. **Chart.js Payload Construction:** Builds a standard Chart.js configuration dictionary (`type`, `data.labels`, `data.datasets`, `options`).
+1. **Data-Driven Chart.js Payload Construction:** Counts fetched objects by a selected property or object type and builds a standard Chart.js configuration dictionary (`type`, `data.labels`, `data.datasets`, `options`).
 2. **High-DPI PNG Rendering:**
    * **Primary (`QuickChart`):** POSTs the Chart.js JSON payload to `https://quickchart.io/chart` at `devicePixelRatio: 2` (`800x450` logical pixels $\rightarrow$ `1600x900` crisp output).
    * **Offline Alternative (`Playwright`):** Renders an HTML `<canvas>` loading local `chart.umd.min.js` in headless Chromium and screenshots `#c` to PNG with zero external network calls.
@@ -72,33 +72,19 @@ The bottom of the pipeline is built and verified:
 
 ---
 
-## Layer 1: Fetching & Schema Discovery (`fetcher.py`) — *Next Up*
+## Layer 1: Fetching & Source Selection (`fetcher.py`) — *Implemented*
 
-Because Anytype spaces contain custom Object Types with arbitrary property schemas, the fetching layer needs to support two complementary retrieval strategies plus live schema discovery:
+The fetcher is shared by the chart-push script and scopes every read to the selected Anytype space. `ANYTYPE_SPACE_ID` can select that space non-interactively; otherwise the script prompts when multiple spaces are accessible. It supports two data sources:
 
-### 1. Query / Collection Retrieval (Recommended Default)
-Anytype exposes saved **Queries (Sets)** and **Collections** as Lists via `list_id`. Leveraging an existing Anytype Query lets you manage complex date ranges and filters visually inside the Anytype UI without hardcoding filter logic in Python:
+### 1. Query / Collection Retrieval
 
-```python
-def fetch_from_query(space, query_id: str, limit: int = 500) -> list:
-    views = space.get_listviews(query_id)
-    default_view = views[0]
-    return default_view.get_objects(limit=limit)
-```
+The script lists discovered Sets and Collections, allows entering an ID when one is not listed, and selects a view before reading its objects through `get_listviews()` and `get_objectsinlistview()`.
 
-### 2. Dynamic Type & Filter Retrieval
-For ad-hoc exploration in the interactive shell without pre-creating a Query in Anytype:
+### 2. Type Table Retrieval
 
-```python
-def fetch_by_type(space, type_key: str, extra_filters: dict | None = None, limit: int = 500) -> list:
-    filters = {"type": type_key}
-    if extra_filters:
-        filters.update(extra_filters)
-    return space.get_objects(filters=filters, limit=limit)
-```
+For ad-hoc selection, the script lists the space's object types and fetches matching objects with `space.get_objects(filters={"type": type_key})`. Both strategies retrieve in pages, up to 500 objects per run.
 
-### 3. Live Schema Inspection (`inspect_properties`)
-Scans a batch of fetched objects and summarizes every discovered property key, inferred format (`Select`, `Multi-select`, `Number`, `Date`, `String`), and sample values so the user (or REPL) knows which fields can be grouped or summed.
+After fetching, the chart-push script offers discovered object properties for a count-by-property chart; choosing the fallback counts objects by type. Numeric aggregation and time bucketing remain part of the planned Modeler layer.
 
 ---
 
